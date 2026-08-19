@@ -1,6 +1,6 @@
 # Code Agent Skills
 
-Skills para estandarizar el flujo de Git y Pull Requests del equipo.
+Skills agnósticas para estandarizar el flujo de Git, Pull Requests y Code Review en cualquier proyecto y stack tecnológico del equipo (Python, Go, Rust, Java, Node/TS, etc.).
 
 ## Instalacion
 

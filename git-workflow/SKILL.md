@@ -55,13 +55,15 @@ Reglas:
 
 ## 4. Checks locales antes de commitear
 
-Correr y dejar en verde **antes de commitear**:
+Identifica y ejecuta los comandos de validación, linter, análisis estático/tipado, pruebas y compilación configurados para el proyecto específico (consultando la documentación del repositorio, `Makefile`, scripts de CI, etc.).
+
+Ejecutar y dejar en verde **antes de commitear**:
 
 ```bash
-npm run lint && npm run typecheck && npm test && npm run build
+<comando-linter> && <comando-analisis-estatico-o-tipos> && <comando-pruebas> && <comando-build>
 ```
 
-Nunca reportar un check como pasado sin haberlo corrido.
+Nunca reportar un check como pasado sin haberlo corrido en el entorno correspondiente.
 
 ## 5. Convención de mensajes de commit
 
