@@ -164,6 +164,27 @@ else
   for e in "${errs[@]}"; do fail "$e"; done
 fi
 
+
+# ── 9. Contenido no confiable ────────────────────────────────────────────────
+# Solo aplica a las skills que ingieren TEXTO LIBRE escrito por terceros: el diff
+# de un PR, o campos como `body` / `title`. Leer campos estructurados
+# (reviewDecision, mergeable, assignees) no cuenta: son enums y logins, no prosa
+# que pueda contener instrucciones dirigidas al agente.
+head_ "9. Regla de contenido no confiable"
+for s in "${SKILLS[@]}"; do
+  if grep -qE 'gh pr diff|--json [a-zA-Z,]*body' "$s/SKILL.md"; then
+    errs=()
+    grep -qi 'DATOS, no\|DATOS, nunca instrucciones' "$s/SKILL.md" \
+      || errs+=("ingiere contenido de terceros sin declarar que son DATOS, no instrucciones")
+    grep -qi 'trust_context' "$s/SKILL.md" \
+      || errs+=("sin clasificación de confianza (trust_context)")
+    if [[ ${#errs[@]} -eq 0 ]]; then pass "$s (ingiere contenido externo, regla presente)"
+    else fail "$s — ${errs[*]}"; fi
+  else
+    pass "$s (no ingiere contenido externo)"
+  fi
+done
+
 # ── Resultado ────────────────────────────────────────────────────────────────
 printf '\n'
 if [[ $FAIL -eq 0 ]]; then
