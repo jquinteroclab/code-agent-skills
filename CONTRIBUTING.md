@@ -1,7 +1,7 @@
 # Guía de Contribución — `code-agent-skills`
 
 Este repositorio publica skills para agentes de código. Todas cumplen **un único
-estándar canónico**. El scaffold vive en [`_template/SKILL.md`](_template/SKILL.md)
+estándar canónico**. El scaffold vive en [`docs/skill-template.md`](docs/skill-template.md)
 y la CI lo hace cumplir.
 
 ---
@@ -116,7 +116,7 @@ todas las que dependen de ella.
 
 ## 4. Secciones obligatorias de `SKILL.md`
 
-Copiar [`_template/SKILL.md`](_template/SKILL.md) y rellenarlo. La CI falla si falta
+Copiar [`docs/skill-template.md`](docs/skill-template.md) y rellenarlo. La CI falla si falta
 alguna de estas:
 
 | § | Sección | Por qué es obligatoria |
@@ -187,7 +187,7 @@ Copiar textualmente en §7 de cada `SKILL.md`:
 
 ## 8. Checklist de PR para una skill nueva o migrada
 
-- [ ] Copiada de `_template/SKILL.md`; todas las secciones obligatorias presentes.
+- [ ] Copiada de `docs/skill-template.md`; todas las secciones obligatorias presentes.
 - [ ] `metadata.version` en SemVer; `requires` / `provides` / `consumes` coherentes.
 - [ ] `allowed-tools` con la superficie mínima suficiente.
 - [ ] `description` con prosa EN + frases disparadoras literales ES + cláusula "Does NOT".

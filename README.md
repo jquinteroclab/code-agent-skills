@@ -4,7 +4,7 @@ Skills agnósticas para estandarizar el flujo de Git, Pull Requests, Code Review
 Quality Gates en cualquier proyecto y stack del equipo (Python, Go, Rust, Java,
 Node/TS, PHP, .NET, Ruby…).
 
-Las 5 skills cumplen una **plantilla canónica única** ([`_template/SKILL.md`](_template/SKILL.md)),
+Las 5 skills cumplen una **plantilla canónica única** ([`docs/skill-template.md`](docs/skill-template.md)),
 verificada en CI por [`scripts/validate-skills.sh`](scripts/validate-skills.sh).
 
 ## Instalación
@@ -75,7 +75,7 @@ revisión remota. La CI falla si divergen.
 
 ## Contribuir
 
-Toda skill nueva o modificada parte de [`_template/SKILL.md`](_template/SKILL.md) y
+Toda skill nueva o modificada parte de [`docs/skill-template.md`](docs/skill-template.md) y
 cumple [`CONTRIBUTING.md`](CONTRIBUTING.md). Antes de abrir el PR:
 
 ```bash

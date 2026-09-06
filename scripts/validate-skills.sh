@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Valida que todas las skills cumplan la plantilla canónica (_template/SKILL.md).
+# Valida que todas las skills cumplan la plantilla canónica (docs/skill-template.md).
 # Uso: scripts/validate-skills.sh
 set -uo pipefail
 
@@ -13,7 +13,7 @@ head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 SKILLS=()
 for d in */; do
-  [[ -f "${d}SKILL.md" && "$d" != "_template/" ]] && SKILLS+=("${d%/}")
+  [[ -f "${d}SKILL.md" ]] && SKILLS+=("${d%/}")
 done
 
 # ── 1. Secciones obligatorias ────────────────────────────────────────────────
@@ -136,6 +136,33 @@ for s in "${SKILLS[@]}"; do
   grep -rqE '\bplantilla-' "$s" 2>/dev/null && errs+=("nombre de archivo en español")
   if [[ ${#errs[@]} -eq 0 ]]; then pass "$s"; else fail "$s — ${errs[*]}"; fi
 done
+
+
+# ── 8. Descubrimiento del instalador ─────────────────────────────────────────
+# `npx skills add` descubre skills buscando carpetas con un SKILL.md dentro.
+# Cualquier SKILL.md que no sea una skill real se instala como una skill fantasma.
+head_ "8. Descubrimiento del instalador (npx skills add)"
+errs=()
+while IFS= read -r f; do
+  d="$(dirname "${f#./}")"
+  [[ "$d" == */* ]] && errs+=("$f: SKILL.md anidado, no es una skill de primer nivel")
+  nm="$(awk '/^---$/{n++;next} n==1&&/^name:/{sub(/^name:[[:space:]]*/,"");print;exit}' "$f")"
+  [[ "$nm" == "skill-name" || "$nm" == "<"* ]] \
+    && errs+=("$f: name placeholder '$nm' — se instalaría como skill fantasma")
+done < <(find . -name SKILL.md -not -path './.git/*')
+
+[[ -f docs/skill-template.md ]] || errs+=("falta docs/skill-template.md")
+[[ -f _template/SKILL.md ]] && errs+=("_template/SKILL.md reintroducido: el instalador lo listaría como skill")
+
+n_found=$(find . -name SKILL.md -not -path './.git/*' | wc -l | tr -d ' ')
+[[ "$n_found" -eq "${#SKILLS[@]}" ]] \
+  || errs+=("hay $n_found archivos SKILL.md pero ${#SKILLS[@]} skills declaradas")
+
+if [[ ${#errs[@]} -eq 0 ]]; then
+  pass "${#SKILLS[@]} SKILL.md = ${#SKILLS[@]} skills reales; la plantilla no es descubrible"
+else
+  for e in "${errs[@]}"; do fail "$e"; done
+fi
 
 # ── Resultado ────────────────────────────────────────────────────────────────
 printf '\n'

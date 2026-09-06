@@ -17,7 +17,7 @@ jobs:
           # ancestro común, y un clone superficial no lo tiene ("no merge base").
           fetch-depth: 0
 
-      - name: Validar todas las skills contra _template/SKILL.md
+      - name: Validar todas las skills contra docs/skill-template.md
         run: ./scripts/validate-skills.sh
 
       - name: Sanidad del diff (trailing whitespace)
