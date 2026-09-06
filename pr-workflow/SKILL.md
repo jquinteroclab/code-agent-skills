@@ -158,7 +158,7 @@ verificados contra una fuente real, con el revisor distinto del autor.
 #### Paso 3 — Componer título y cuerpo
 
 **Título:** `tipo: descripción corta del cambio`, con los tipos de
-`git-workflow/references/commit-convention.md` §1. Aplica igual aunque la rama sea
+`git-workflow/references/commit-message-policy.md` §1. Aplica igual aunque la rama sea
 `claude/…` o `codex/…`.
 
 **Cuerpo:** rellenar `assets/pr-description-template.md` en un archivo temporal.

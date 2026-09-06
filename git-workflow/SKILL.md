@@ -128,7 +128,7 @@ cat .agent/handoff/quality-gates.json 2>/dev/null   # esperado: existe y status 
 | Ruta | Cuándo | Por qué |
 | --- | --- | --- |
 | `references/branch-naming-policy.md` | §4.A Paso 1 | Prefijos por procedencia y reglas de formato |
-| `references/commit-convention.md` | §4.B Paso 2 | Tipos permitidos y reglas verificables |
+| `references/commit-message-policy.md` | §4.B Paso 2 | Tipos permitidos y reglas verificables |
 
 ---
 
@@ -183,7 +183,7 @@ No commitear "para no perder el trabajo": usar `git stash` si hace falta. -> §6
 
 #### Paso 2 — Componer y validar el mensaje
 
-**Acción:** aplicar `references/commit-convention.md` §1 y §2.
+**Acción:** aplicar `references/commit-message-policy.md` §1 y §2.
 
 ```bash
 s="<tipo>: <descripción en imperativo>"
@@ -318,4 +318,4 @@ sin push), declarar lo omitido y emitir `STATUS: PARTIAL`.
 | Ruta | Tipo | Cuándo cargar |
 | --- | --- | --- |
 | `references/branch-naming-policy.md` | Conocimiento | §4.A Paso 1 |
-| `references/commit-convention.md` | Conocimiento | §4.B Paso 2 |
+| `references/commit-message-policy.md` | Conocimiento | §4.B Paso 2 |

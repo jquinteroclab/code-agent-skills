@@ -1,0 +1,23 @@
+name: validate-skills
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  canonical-template:
+    name: Plantilla canónica
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar todas las skills contra _template/SKILL.md
+        run: ./scripts/validate-skills.sh
+
+      - name: Sanidad del diff (trailing whitespace)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          git diff --check "origin/${{ github.base_ref }}...HEAD"

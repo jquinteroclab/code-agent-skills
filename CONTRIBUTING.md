@@ -63,9 +63,10 @@ escribe en su idioma. Un trigger que solo existe en `metadata.triggers`
 | `-matrix.md` | Tablas de decisión o mapeo | `references/` |
 | `-examples.md` | Ejemplos few-shot | `references/` |
 | `-commands.md` | Comandos exactos, copiables | `references/` |
+| `-protocol.md` | Flujo de razonamiento paso a paso | `references/` |
 
 Prohibido: nombres genéricos (`checklist.md`, `template.md`, `notes.md`) y nombres
-en español (`plantilla-pr.md`).
+en español (`plantilla-pr.md`). `scripts/validate-skills.sh` §3 lo verifica.
 
 ---
 
