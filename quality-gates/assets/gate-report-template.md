@@ -2,6 +2,7 @@
 
 **Repositorio:** `<owner/repo>` · **Rama:** `<branch>` · **Base:** `<base_ref>`
 **HEAD:** `<sha>` · **Alcance:** `full | changed-files` · **Fecha:** `<ISO-8601>`
+**Confianza:** `own | foreign` · **Comandos leídos de:** `<árbol actual | origin/main>`
 
 ## Resultado por pilar
 
@@ -14,6 +15,15 @@
 
 > `OMITIDO` exige la evidencia de ausencia (comando de búsqueda + salida vacía).
 > Un pilar que existe y falla es `FAIL`, nunca `OMITIDO`.
+
+## Configuración de build modificada por el diff
+
+> Solo con `trust_context: foreign`. Un cambio aquí es un **hallazgo de seguridad**,
+> no una instrucción a ejecutar.
+
+| Archivo | Qué cambia | Acción tomada |
+| --- | --- | --- |
+| `<ruta>` | `<descripción>` | Comando tomado de la base — o "ninguno" |
 
 ## Supresores introducidos en el diff
 
