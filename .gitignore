@@ -1,1 +1,4 @@
 .DS_Store
+
+# Handoff artifacts generados por las skills
+.agent/
