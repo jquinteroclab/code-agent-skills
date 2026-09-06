@@ -1,115 +1,321 @@
 ---
 name: git-workflow
-description: Aplica el flujo oficial de Git del equipo. Cubre estructura de ramas (solo main), convención de nombres con prefijos, Conventional Commits, checks locales obligatorios y reglas de la rama main. Usar al crear o nombrar ramas, hacer commits, correr checks antes de commit, o cuando el usuario mencione GitHub Flow, convenciones de ramas, mensajes de commit o el flujo diario de Git del equipo.
+description: >-
+  Applies the team's official Git flow (GitHub Flow) in the local worktree: branch
+  creation from main with provenance-based prefixes, Conventional Commits, and the
+  mandatory quality gate before any commit. Enforces that AI-generated work is
+  traceable and human-reviewed.
+  Trigger phrases (ES): "crea una rama", "haz el commit", "sube la rama",
+  "cómo nombro esta rama", "convención de commits", "flujo de git del equipo".
+  Does NOT run the quality suite itself (delegates to `quality-gates`), does NOT
+  create or merge Pull Requests (use `pr-workflow`), does NOT review code.
+allowed-tools: Read, Grep, Glob, Bash
+metadata:
+  version: 1.0.0
+  owner: platform-engineering
+  stability: stable
+  pipeline-stage: "1,4"
+  modes:
+    - branch
+    - commit
+  anti-triggers:
+    - "abre el PR -> usar pr-workflow"
+    - "corre los checks -> usar quality-gates"
+    - "revisa el código -> usar code-review"
+    - "reglas de merge de main -> usar pr-workflow"
+  requires:
+    - quality-gates@^1.0.0   # solo en modo `commit`
+  provides:
+    - branch_name
+    - commit_sha
+    - pushed
+  consumes:
+    - gate_report            # solo en modo `commit`
 ---
 
 # Git Workflow
 
-Flujo oficial del equipo (GitHub Flow). Aplica igual a trabajo manual y generado por AI (Claude Code, Codex, Cursor, etc.).
+> **Una frase:** gobierna todo lo que ocurre en el worktree local — ramas, commits y
+> push — con trazabilidad de procedencia humano/agente.
 
-## 1. Estructura de ramas
+---
 
-- **`main`** es la única rama principal. Todo lo que está en `main` debe estar listo para desplegar.
-- Las ramas de trabajo se crean desde `main`, viven poco tiempo y se eliminan después del merge.
-- **No usar** `develop`, `release/*` ni `hotfix/*`.
+## 1. Contexto y Propósito
 
-## 2. Convención de nombres de ramas
+### 1.1 Qué hace
 
-| Origen | Prefijo permitido | Ejemplo |
-| --- | --- | --- |
-| Trabajo manual | `feature/`, `fix/`, `chore/`, `refactor/`, `docs/`, `test/` | `feature/crear-contacto` |
-| Claude Code | `claude/` | `claude/agregar-campos-personalizados` |
-| Codex | `codex/` | `codex/fix-validacion-email` |
-| Otras herramientas AI | Prefijo de la herramienta | `cursor/…`, `aider/…` |
+- Crear ramas desde `main` actualizado, con prefijo de procedencia.
+- Validar el nombre de rama contra la política antes de crearla.
+- Generar commits en Conventional Commits, verificando el formato.
+- **Bloquear el commit** si no existe un `gate_report` verde de `quality-gates`.
+- Publicar la rama en el remoto.
 
-Reglas:
-- Siempre en minúsculas y con guiones (`-`).
-- Nombre corto y descriptivo.
-- Una rama = un solo propósito o funcionalidad.
+### 1.2 Qué NO hace
 
-## 3. Flujo para crear rama y trabajar
+| Fuera de alcance | Skill responsable |
+| --- | --- |
+| Descubrir y ejecutar linter, tipos, pruebas o build | `quality-gates` |
+| Reglas de merge y protección de `main` | `pr-workflow` (fuente única) |
+| Crear, describir, asignar o mergear Pull Requests | `pr-workflow` |
+| Auditar bugs, seguridad, cobertura o duplicación | `code-review` |
+| Publicar reviews en GitHub | `pr-review` |
 
-### Trabajo manual
+### 1.3 Posición en el pipeline
 
-1. Actualizar `main`:
-   ```bash
-   git checkout main && git pull origin main
-   ```
-2. Crear la rama con un nombre descriptivo:
-   ```bash
-   git checkout -b feature/nombre-descriptivo
-   ```
-3. Trabajar y hacer commits siguiendo la convención de la sección 5.
-4. Correr los checks locales (sección 4) antes de cada commit relevante.
-5. Subir la rama:
-   ```bash
-   git push -u origin feature/nombre-descriptivo
-   ```
+**Etapa 1:** `[inicio]` -> **`git-workflow [branch]`** -> `⟨desarrollo⟩`
+**Etapa 4:** `quality-gates` -> **`git-workflow [commit]`** -> `pr-workflow [create]`
 
-### Trabajo con Claude Code, Codex u otras AI
+---
 
-1. La herramienta crea la rama (ejemplo: `claude/agregar-campos-personalizados`).
-2. La herramienta realiza los cambios y commits.
-3. **Revisión humana obligatoria**: revisar el código generado, corregir o mejorar si hace falta, y ajustar commits genéricos si es necesario.
-4. El desarrollador es responsable del código que llega a `main`, aunque lo haya generado una herramienta de AI.
+## 2. Activación
 
-## 4. Checks locales antes de commitear
+### 2.1 Activar cuando
 
-Identifica y ejecuta los comandos de validación, linter, análisis estático/tipado, pruebas y compilación configurados para el proyecto específico (consultando la documentación del repositorio, `Makefile`, scripts de CI, etc.).
+- El usuario dice: "crea una rama", "haz el commit", "sube la rama", "cómo nombro
+  esta rama", "convención de commits", "flujo de git del equipo", "GitHub Flow".
+- Se detecta el estado: se va a empezar un trabajo nuevo, o hay cambios listos para
+  commitear.
 
-Ejecutar y dejar en verde **antes de commitear**:
+### 2.2 Modos de operación
+
+| Modo | Etapa | Se activa cuando | Protocolo |
+| --- | --- | --- | --- |
+| `branch` | 1 | Empieza un trabajo nuevo | §4.A |
+| `commit` | 4 | Los cambios están listos y `quality-gates` pasó | §4.B |
+
+### 2.3 NO activar cuando
+
+| Situación | Skill correcta |
+| --- | --- |
+| "abre el PR" / "asigna revisor" / "mergea" | `pr-workflow` |
+| "corre los checks" / "pasa los gates" | `quality-gates` |
+| "revisa este código" / "resuelve los hallazgos" | `code-review` |
+
+---
+
+## 3. Prerrequisitos y Entradas Esperadas
+
+### 3.1 Contrato de entrada
+
+| Entrada | Tipo | Requerido | Origen | Default | Si falta |
+| --- | --- | --- | --- | --- | --- |
+| `mode` | `enum` | Sí | intención del usuario | — | Inferir de §2.2; si es ambiguo, **preguntar** |
+| `purpose` | `string` | Sí (modo `branch`) | argumento del usuario | — | **PREGUNTAR — no inferir del diff** |
+| `origin_prefix` | `enum` | Sí (modo `branch`) | quién ejecuta la skill | `claude/` si lo ejecuta Claude Code | usar default |
+| `gate_report` | `json` | Sí (modo `commit`) | `quality-gates` | — | **Invocar `quality-gates` AHORA -> §6.1** |
+| `commit_type` | `enum` | Sí (modo `commit`) | naturaleza del cambio | — | Derivar del diff; si es ambiguo, **preguntar** |
+
+### 3.2 Precondiciones verificables
+
+**Modo `branch`:**
 
 ```bash
-<comando-linter> && <comando-analisis-estatico-o-tipos> && <comando-pruebas> && <comando-build>
+git status --porcelain          # esperado: vacío. Si no -> §6.2
+git rev-parse --abbrev-ref HEAD # esperado: main. Si no -> §6.3
+git remote -v                   # esperado: origin presente
 ```
 
-Nunca reportar un check como pasado sin haberlo corrido en el entorno correspondiente.
+**Modo `commit`:**
 
-## 5. Convención de mensajes de commit
-
-**Conventional Commits**: `tipo: descripción en imperativo`
-
-| Tipo | Uso |
-| --- | --- |
-| `feat` | Nueva funcionalidad |
-| `fix` | Corrección de bug |
-| `chore` | Mantenimiento / configuración |
-| `refactor` | Mejoras de código sin cambiar comportamiento |
-| `docs` | Solo documentación |
-| `test` | Agregar o modificar tests |
-| `style` | Formato (espacios, comas, etc.) |
-| `perf` | Mejoras de rendimiento |
-
-Ejemplos:
-```
-feat: agregar campos personalizados a contactos
-fix: corregir validación de email en formularios
-chore: actualizar dependencias
-refactor: separar lógica de permisos
-test: agregar tests del servicio de pipeline
-docs: documentar endpoints de contactos
+```bash
+git rev-parse --abbrev-ref HEAD   # esperado: NO main. Si es main -> §6.4 (BLOQUEANTE)
+git diff --cached --stat          # esperado: hay algo staged, o hay cambios que stagear
+cat .agent/handoff/quality-gates.json 2>/dev/null   # esperado: existe y status SUCCESS
 ```
 
-Reglas:
-- Modo imperativo ("agregar", "corregir"…).
-- Primera línea máximo 72 caracteres.
-- Empezar con minúscula después de los dos puntos.
-- No terminar con punto.
+### 3.3 Archivos a leer obligatoriamente
 
-> Si Claude Code o Codex generan commits genéricos, se pueden dejar: el **Squash and merge** usará el título del Pull Request como mensaje final en `main`.
+| Ruta | Cuándo | Por qué |
+| --- | --- | --- |
+| `references/branch-naming-policy.md` | §4.A Paso 1 | Prefijos por procedencia y reglas de formato |
+| `references/commit-convention.md` | §4.B Paso 2 | Tipos permitidos y reglas verificables |
 
-## 6. Reglas de la rama `main`
+---
 
-- Está protegida; nunca se hace push directo.
-- Solo se llega a ella mediante Pull Request.
-- Debe pasar todos los checks de GitHub Actions.
-- Requiere al menos 1 aprobación.
-- Debe tener al menos un revisor y un responsable asignado.
-- Merge recomendado: **Squash and merge**.
+## 4. Protocolo de Ejecución
 
-## 7. Buenas prácticas
+### §4.A — Modo `branch`
 
-- Las ramas viven poco: idealmente menos de 2–3 días.
-- Commits pequeños y frecuentes.
-- Si una rama se queda vieja, actualizarla con `main` antes de abrir el PR.
-- Revisar el código de los demás, incluyendo el generado por AI.
+#### Paso 1 — Componer y validar el nombre
+
+**Acción:** aplicar `references/branch-naming-policy.md` §2 y §3.
+
+```bash
+b="<prefijo>/<proposito-en-kebab-case>"
+[[ "$b" =~ ^(feature|fix|chore|refactor|docs|test|claude|codex|cursor|aider)/[a-z0-9-]+$ ]] \
+  && [[ ${#b} -le 60 ]] && echo "OK: $b" || echo "RECHAZADO: $b"
+```
+
+**Condición de completitud:** el nombre imprime `OK`.
+**Si falla:** recomponer. -> §6.5 si el nombre ya existe.
+
+#### Paso 2 — Actualizar `main` y crear la rama
+
+```bash
+git checkout main && git pull origin main
+git checkout -b "$b"
+```
+
+**Condición de completitud:** `git rev-parse --abbrev-ref HEAD` devuelve `$b`.
+**Si falla:** conflicto al sincronizar -> §6.6.
+
+#### Paso 3 — Emitir el handoff
+
+`STATUS: SUCCESS` con `branch_name` y `base_sha`.
+
+---
+
+### §4.B — Modo `commit`
+
+#### Paso 1 — Gate de Commit (bloqueante)
+
+**Objetivo:** garantizar que ningún commit entra con gates en rojo.
+
+```bash
+jq -r '.status, (.pillars[] | "\(.name)=\(.exit_code)")' .agent/handoff/quality-gates.json
+```
+
+**Condición de completitud:** `status == "SUCCESS"` y todo `exit_code` es `0` o `null`
+(pilar OMITIDO con evidencia).
+
+**Si falla o el archivo no existe:** **detener e invocar `quality-gates` AHORA.**
+No commitear "para no perder el trabajo": usar `git stash` si hace falta. -> §6.1
+
+#### Paso 2 — Componer y validar el mensaje
+
+**Acción:** aplicar `references/commit-convention.md` §1 y §2.
+
+```bash
+s="<tipo>: <descripción en imperativo>"
+[[ "$s" =~ ^(feat|fix|chore|refactor|docs|test|style|perf):\ [a-záéíóúñ] ]] \
+  && [[ ${#s} -le 72 ]] && [[ "$s" != *. ]] && echo "OK: $s" || echo "RECHAZADO: $s"
+```
+
+**Condición de completitud:** el asunto imprime `OK`.
+
+#### Paso 3 — Commitear
+
+```bash
+git add <rutas-explícitas>     # nunca `git add -A` a ciegas: ver §6.7
+git diff --cached --check       # esperado: sin salida
+git commit -m "$s" -m "<cuerpo opcional>" -m "Co-Authored-By: <Agente> <noreply@…>"
+```
+
+**Condición de completitud:** `git log -1 --format=%H` devuelve un SHA nuevo.
+**Prohibido** `--no-verify`.
+
+#### Paso 4 — Publicar la rama
+
+**Acción irreversible hacia el exterior: requiere confirmación explícita del usuario.**
+
+```bash
+git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
+```
+
+**Condición de completitud:** el push devuelve `exit_code 0` y la rama existe en `origin`.
+
+### Diagrama de flujo
+
+```
+[branch] ──> ⟨desarrollo⟩ ──> [code-review] ──> [quality-gates]
+                                                      │
+                                              SUCCESS │ BLOCKED ──> vuelve a code-review
+                                                      ▼
+                            [commit: gate ──> mensaje ──> commit ──> push]
+                                                      │
+                                                      ▼
+                                              [pr-workflow: create]
+```
+
+---
+
+## 5. Contrato de Salida
+
+### 5.1 Artefacto producido
+
+**Formato:** rama creada, o commit + push ejecutados, más el JSON de handoff.
+
+```json
+// .agent/handoff/git-workflow.json
+{
+  "skill": "git-workflow",
+  "version": "1.0.0",
+  "mode": "commit",
+  "status": "SUCCESS",
+  "branch_name": "claude/agregar-campos-personalizados",
+  "base_sha": "<sha>",
+  "commit_sha": "<sha>",
+  "commit_subject": "feat: agregar campos personalizados a contactos",
+  "pushed": true,
+  "gate_report_ref": ".agent/handoff/quality-gates.json"
+}
+```
+
+### 5.2 Efectos laterales
+
+| Efecto | Reversible | Requiere confirmación explícita |
+| --- | --- | --- |
+| Crear rama local | Sí | No |
+| `git checkout main` + `pull` | Sí | No — pero exige worktree limpio (§3.2) |
+| Crear commit | Sí (`git reset`) | No |
+| **`git push` al remoto** | **Difícilmente** | **Sí** |
+
+### 5.3 Estado de handoff
+
+```
+STATUS: SUCCESS | BLOCKED | PARTIAL
+ARTIFACTS: .agent/handoff/git-workflow.json
+BLOCKERS: <razón, o "ninguno">
+NEXT: pr-workflow [modo: create] | ⟨desarrollo⟩
+```
+
+---
+
+## 6. Manejo de Errores y Edge Cases
+
+| # | Caso | Detección | Acción | Nunca hacer |
+| --- | --- | --- | --- | --- |
+| 6.1 | Sin `gate_report` verde | archivo ausente o `status != SUCCESS` | **Detener e invocar `quality-gates`** | Commitear igualmente |
+| 6.2 | Worktree sucio al crear rama | `git status --porcelain` no vacío | Proponer `git stash` y confirmar con el usuario | `git checkout main` a ciegas (pierde contexto) |
+| 6.3 | Ya se está en una rama de trabajo | `HEAD != main` en modo `branch` | Preguntar: ¿nueva rama desde `main`, o seguir en la actual? | Crear una rama anidada sin avisar |
+| 6.4 | Intento de commit en `main` | `HEAD == main` | **DETENER.** Crear rama y mover los cambios | Commitear en `main` |
+| 6.5 | El nombre de rama ya existe | `git rev-parse --verify` OK | Preguntar: ¿reutilizar o renombrar? | Sobrescribir |
+| 6.6 | Conflicto al sincronizar con `main` | `git pull` falla | Reportar los archivos en conflicto y detener | Resolver conflictos sin revisión humana |
+| 6.7 | Archivos ajenos en el worktree | `git status` con archivos no relacionados | Stagear **rutas explícitas**; listar lo excluido | `git add -A` arrastrando cambios ajenos |
+| 6.8 | Push rechazado (non-fast-forward) | `git push` falla | Reportar; proponer `git pull --rebase` y confirmar | `--force` sin autorización explícita |
+| 6.9 | Push a `main` solicitado | destino `main` | **DETENER.** `main` solo se alcanza vía PR | Ejecutarlo |
+
+### 6.10 Regla de degradación
+
+Si el protocolo no puede completarse: entregar lo hecho (rama creada, commit local
+sin push), declarar lo omitido y emitir `STATUS: PARTIAL`.
+
+---
+
+## 7. Reglas Innegociables
+
+1. **Evidencia > afirmación.** Todo estado reportado procede de una salida de comando,
+   una lectura de archivo o un grep. Cero inferencias presentadas como hechos.
+2. **Cero invención.** Comandos, rutas y nombres: si no se observaron, no se escriben.
+   Ante duda, preguntar.
+3. **Sin efectos irreversibles sin confirmación** (push, publicar review, merge, borrar).
+4. **Idioma de la salida = idioma del usuario.**
+5. **Responsabilidad humana no delegable** sobre lo que llega a `main`, aunque el
+   cambio lo haya generado una herramienta de AI. **Todo commit generado por un
+   agente requiere revisión humana antes del merge.**
+
+### Reglas específicas de esta skill
+
+6. **Gate de Commit:** prohibido `git commit` sin un `gate_report` verde de esta misma
+   sesión. Prohibido `--no-verify`.
+7. **`main` es intocable localmente:** nunca commit ni push directo.
+8. **Procedencia veraz:** un agente nunca usa un prefijo de trabajo manual.
+
+---
+
+## 8. Recursos
+
+| Ruta | Tipo | Cuándo cargar |
+| --- | --- | --- |
+| `references/branch-naming-policy.md` | Conocimiento | §4.A Paso 1 |
+| `references/commit-convention.md` | Conocimiento | §4.B Paso 2 |
