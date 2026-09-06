@@ -1,196 +1,371 @@
 ---
 name: pr-review
-description: Revisa pull requests de GitHub con foco en bugs, seguridad, code smells, cobertura y duplicación. Usa cuando el usuario pida revisar un PR, hacer code review, analizar un diff de PR, o mencione gh pr diff, un issue asociado o subir review/aprobación en GitHub. Incluye el flujo completo de ejecución de gates locales, lectura del issue y publicación del comentario o review con plantilla estructurada.
+description: >-
+  Reviews a REMOTE GitHub pull request read-only: pulls the diff at the head SHA,
+  reads the linked issue, runs the local gates, classifies findings by severity with
+  blob-anchored evidence, and publishes the verdict to GitHub only after explicit user
+  confirmation.
+  Trigger phrases (ES): "revisa el PR #N", "haz code review del pull request",
+  "analiza este diff de PR", "sube el review a GitHub", "aprueba el PR".
+  Does NOT modify code or apply fixes (use `code-review`), does NOT create branches,
+  commits or PRs (use `git-workflow` / `pr-workflow`).
+allowed-tools: Read, Grep, Glob, Bash
+metadata:
+  version: 1.0.0
+  owner: platform-engineering
+  stability: stable
+  pipeline-stage: "6"
+  anti-triggers:
+    - "arregla lo que encontraste -> usar code-review [remediation]"
+    - "revisa mi código local antes del PR -> usar code-review [pre-flight]"
+    - "abre / mergea el PR -> usar pr-workflow"
+  requires:
+    - pr-workflow@^1.0.0
+    - quality-gates@^1.0.0
+  provides:
+    - verdict
+    - findings
+    - review_url
+  consumes:
+    - pr_number
+    - head_sha
 ---
 
-# PR Review
+# PR Review (revisión remota, read-only)
 
-Skill para realizar revisiones exhaustivas de Pull Requests. Produce un informe estructurado y, al final, publica el review o la aprobación en GitHub.
+> **Una frase:** el revisor audita el PR de otra persona sobre el SHA del head, con
+> cada hallazgo anclado a una URL verificable, y publica solo tras confirmación.
 
-## Cuándo activar
+---
 
-- Usuario pide revisar un PR (`revisa el PR #N`, `review PR`, `analiza este diff`).
-- Se menciona `gh pr diff`, un issue asociado o subir comentario/review en GitHub.
+## 1. Contexto y Propósito
 
-## Entrada esperada
+### 1.1 Qué hace
 
-El usuario normalmente indica:
-- Número de PR y repo (`gh pr diff 12 --repo org/repo` o equivalente).
-- Issue asociada (ej. `PROJ-157` o enlace al gestor de trabajo).
-- Opcionalmente el commit SHA o branch base.
+- Obtener el diff y el contexto del PR **en el SHA del head**.
+- Leer el issue asociado y su criterio de cierre.
+- Ejecutar los gates sobre el código del PR (vía `quality-gates`).
+- Clasificar hallazgos por categoría y severidad, con enlace al blob.
+- Decidir el veredicto con el árbol booleano de 4 preguntas.
+- **Publicar el review en GitHub, previa confirmación explícita del usuario.**
 
-Si falta el número de PR o el repo, pregunta antes de continuar.
+### 1.2 Qué NO hace
 
-## Flujo de trabajo (obligatorio)
+| Fuera de alcance | Skill responsable |
+| --- | --- |
+| Modificar archivos o aplicar fixes | `code-review [remediation]` |
+| Auditar el working tree local antes del PR | `code-review [pre-flight]` |
+| Descubrir y ejecutar linter, tipos, pruebas o build | `quality-gates` |
+| Crear ramas, commits o hacer push | `git-workflow` |
+| Crear, asignar o mergear el PR | `pr-workflow` |
 
-Ejecuta los pasos en orden. No saltes pasos críticos.
+> Esta skill es **read-only sobre el código**: `allowed-tools` no incluye `Edit` ni
+> `Write` deliberadamente. La ausencia de la herramienta es una garantía más fuerte
+> que una instrucción en prosa.
 
-### 1. Obtener el diff y contexto del PR
+### 1.3 Posición en el pipeline
+
+`pr-workflow [create]` -> **`pr-review`** -> `pr-workflow [merge]`
+Si el veredicto es `request-changes`:
+**`pr-review`** -> `code-review [remediation]` -> `quality-gates` -> `git-workflow` -> **`pr-review`** (re-review)
+
+---
+
+## 2. Activación
+
+### 2.1 Activar cuando
+
+- El usuario dice: "revisa el PR #N", "haz code review del pull request", "analiza
+  este diff de PR", "sube el review a GitHub", "aprueba el PR".
+- Se menciona `gh pr diff`, un número o URL de PR, o un issue asociado a un PR.
+
+### 2.2 NO activar cuando
+
+| Situación | Skill correcta |
+| --- | --- |
+| "revisa mi código antes de abrir el PR" | `code-review [pre-flight]` |
+| "arregla los hallazgos que encontraste" | `code-review [remediation]` |
+| "abre el PR" / "mergea" / "asigna revisor" | `pr-workflow` |
+| "corre los checks locales" | `quality-gates` |
+
+---
+
+## 3. Prerrequisitos y Entradas Esperadas
+
+### 3.1 Contrato de entrada
+
+| Entrada | Tipo | Requerido | Origen | Default | Si falta |
+| --- | --- | --- | --- | --- | --- |
+| `pr_number` | `int` | Sí | usuario / `pr-workflow` | — | **PREGUNTAR Y DETENER** |
+| `repo` | `owner/repo` | Sí | `gh repo view` | repo actual | **PREGUNTAR si es ambiguo** |
+| `head_sha` | `sha` | Sí | `gh pr view --json headRefOid` | — | Derivar; nunca revisar sobre `main` |
+| `issue_id` | `string` | No | cuerpo del PR / usuario | — | Pedir enlace; si no hay, **declararlo** -> §6.3 |
+
+### 3.2 Precondiciones verificables
 
 ```bash
+gh auth status
+gh pr view <N> --repo <owner/repo> --json number,state,isDraft,author,headRefOid
+```
+
+Si `state != OPEN` o `isDraft == true`, preguntar antes de continuar. -> §6.8
+
+### 3.3 Archivos a leer obligatoriamente
+
+| Ruta | Cuándo | Por qué |
+| --- | --- | --- |
+| `references/review-checklist.md` | Paso 4 | Checklist compartido + delta de revisión remota |
+| `assets/review-report-template.md` | Paso 6 | Estructura exacta del informe |
+
+### 3.4 Presupuesto de diff
+
+Si el diff supera **50 archivos** o **3.000 líneas**:
+
+1. Priorizar por riesgo: **seguridad/auth > lógica de dominio > I/O > tests > docs/config**.
+2. Revisar hasta agotar el presupuesto.
+3. **Declarar los archivos NO revisados** en la sección "Cobertura de la revisión".
+4. Emitir `STATUS: PARTIAL` y decirlo también en el informe publicado.
+
+> **PROHIBIDO** presentar una cobertura parcial como completa.
+
+---
+
+## 4. Protocolo de Ejecución
+
+### Paso 1 — Obtener diff y contexto
+
+```bash
+gh pr view <N> --repo <owner/repo> --json title,body,baseRefName,headRefName,headRefOid,commits,files,author,url
 gh pr diff <N> --repo <owner/repo>
-gh pr view <N> --repo <owner/repo> --json title,body,baseRefName,headRefName,commits,files,author,url
 ```
 
-- Guarda el SHA del head commit (ej. `9d5d154`).
-- Lista los archivos tocados.
+**Condición de completitud:** `head_sha` capturado y lista de archivos tocados conocida.
+Comprobar además si el autor del PR es el usuario autenticado -> §6.4.
 
-### 2. Leer el issue asociado
+### Paso 2 — Leer el issue asociado
 
-Usa la herramienta, CLI o enlace disponible para leer el issue (ej. `PROJ-157`):
+Objetivo del ticket, criterios de aceptación y **nivel de prueba exigido** (¿integración
+real, e2e, o bastan dobles?).
 
-- Objetivo del ticket.
-- Criterios de aceptación / cierre.
-- Acciones recomendadas o puntos pendientes.
+**Si no hay acceso:** pedir contenido o enlace al usuario. Si no está disponible,
+continuar **declarando en el informe que se revisó sin criterio de cierre**. -> §6.3
 
-Si no hay acceso al gestor de trabajo, pide al usuario el contenido o el enlace.
+### Paso 3 — Ejecutar los gates sobre el head del PR
 
-### 3. Ejecutar gates locales (cuando el código esté disponible)
-
-En el directorio del repo (checkout del head del PR si es necesario), identifica los comandos documentados para validación, análisis estático, pruebas y cobertura. Consulta primero las instrucciones, archivos de configuración y documentación del repositorio. Ejecuta los gates aplicables y no inventes comandos.
+**Invocar `quality-gates`** con el checkout del head del PR. **No reimplementar** aquí
+el descubrimiento ni la ejecución de comandos.
 
 ```bash
-<comando-de-validacion>
-<comando-de-analisis-estatico> <archivos-del-PR>
-<comando-de-pruebas>
-# Opcional y recomendado cuando el proyecto lo soporte:
-<comando-de-cobertura> <archivos-del-PR>
+gh pr checkout <N> --repo <owner/repo>   # requiere confirmación: modifica el worktree
 ```
 
-Registra resultados exactos (número de suites/tests, warnings, fallos). Si algún gate falla, márcalo como bloqueante.
+Añadir cobertura acotada a los archivos del PR cuando el proyecto lo soporte.
+Registrar **cifras exactas**: suites, tests, warnings, porcentajes.
 
-### 4. Análisis del diff
+**Si el repo no está clonado:** **preguntar antes de clonar** (§6.5). Si el usuario lo
+rechaza, revisar solo con `gh pr diff` y **declarar en el informe que los gates no se
+ejecutaron**. Nunca inventar su resultado.
 
-Revisa **solo** los cambios del PR (y el contexto mínimo necesario del código existente). Clasifica hallazgos en estas categorías:
+### Paso 4 — Analizar el diff
 
-#### Bugs (Errores)
-- Fallos lógicos o de funcionamiento que producirán comportamiento incorrecto en runtime.
-- Código muerto / métodos inalcanzables.
-- Violaciones de contratos (puertos, interfaces, convenciones documentadas).
-- Regresiones respecto al comportamiento anterior o a los criterios del issue.
-- Falta de comprobación de filas afectadas, race conditions, estados inconsistentes.
+**Acción:** recorrer `references/review-checklist.md` sobre **solo los cambios del PR**
+y el contexto mínimo necesario del código existente.
 
-#### Vulnerabilidades y Seguridad
-- Entradas no confiables que permitan inyección, ejecución no deseada o manipulación de datos.
-- Secretos expuestos.
-- Filtración de información sensible al cliente (PII, trazas, mensajes internos).
-- Configuraciones débiles, controles de acceso ausentes o escalada de privilegios.
-- Exposición de detalles internos de almacenamiento, infraestructura o dependencias en respuestas públicas.
+**Condición de completitud:** cada hallazgo tiene categoría, severidad y **enlace al
+blob con el SHA del head**.
 
-#### Code Smells
-- Código confuso, redundante o difícil de mantener.
-- Nombres engañosos (`try*` que lanza, etc.).
-- Duplicación estructural (bloques try/catch idénticos, listas blancas copiadas).
-- Comentarios útiles borrados o docblocks incorrectos (status codes, contratos).
-- Alcance del PR inconsistente con el título o el issue.
-- Campos públicos no consumidos.
+> Un hallazgo sin URL verificable **no se incluye en el informe**.
 
-#### Cobertura de código
-- Porcentaje de statements/branches de los archivos tocados.
-- Líneas/casos sin cubrir que el issue o el PR prometen cubrir.
-- Especial atención al nivel de fidelidad de las pruebas cuando el issue exige integración, extremo a extremo o componentes reales.
-- Criterio de cierre del issue: si pide e2e o integración real, verifica que exista.
+### Paso 5 — Decidir severidad y veredicto
 
-#### Duplicación de código
-- Bloques repetidos dentro del PR o respecto al resto del codebase.
-- Funciones de validación, normalización o traducción de errores copiadas en varios lugares.
-- Oportunidades claras de extracción de componentes reutilizables.
+Aplicar el árbol de 4 preguntas de `references/review-checklist.md`:
 
-### 5. Severidad y bloqueantes
+| Situación | Veredicto |
+| --- | --- |
+| Hay hallazgos **bloqueantes** | `--request-changes` |
+| Sin bloqueantes, pero hay comentarios útiles | `--comment` |
+| Todo limpio y gates verdes | `--approve` |
+| **El autor del PR es el usuario autenticado** | `--comment` (§6.4) |
 
-Asigna severidad (Alto / Medio / Bajo) y decide qué es **bloqueante**:
+### Paso 6 — Generar el informe
 
-- Bloqueante típico: bugs de lógica, regresiones de seguridad, incumplimiento del criterio de cierre del issue, gates rotos, código muerto que contradice el diseño.
-- No bloqueante: code smells, mejoras de cobertura menores, docblocks, refactorizaciones sugeridas.
+Rellenar `assets/review-report-template.md` **sin alterar el esqueleto**. Omitir las
+secciones vacías o marcarlas "Ninguno".
 
-### 6. Generar el informe
+### Paso 7 — Gate de publicación (bloqueante)
 
-Usa **exactamente** esta estructura (adapta secciones vacías omitiéndolas o poniendo "Ninguno"):
+**PROHIBIDO** ejecutar `gh pr review` o `gh pr comment` sin confirmación explícita del
+usuario **en este turno**. Antes de publicar, presentar siempre:
 
-```markdown
-## Revisión — <ISSUE-ID>
-**Gates verificados en local sobre `<SHA>`**: `<comando de validación>` ✅/❌ · `<comando de análisis estático>` sobre los N archivos ✅/❌ · `<comando de pruebas>` ✅/❌ X suites / Y tests.
-<Resumen ejecutivo de 2-4 frases: dirección del PR, si resuelve los puntos del issue, hallazgos principales y qué se considera bloqueante.>
+1. el informe completo,
+2. el veredicto propuesto,
+3. el comando exacto a ejecutar,
+
+y **esperar el "sí"**.
+
+> Un review publicado es público, irreversible y va bajo la identidad del usuario.
+> `--request-changes` bloquea activamente el trabajo de otra persona.
+
+Tras la confirmación:
+
+```bash
+gh pr review <N> --repo <owner/repo> --request-changes --body-file <informe.md>
+gh pr review <N> --repo <owner/repo> --comment         --body-file <informe.md>
+gh pr review <N> --repo <owner/repo> --approve         --body-file <informe.md>
+```
+
+Alternativa como comentario normal:
+
+```bash
+gh pr comment <N> --repo <owner/repo> --body-file <informe.md>
+```
+
+**Condición de completitud:** el comando devuelve `exit_code 0`. Confirmar al usuario
+e **incluir el enlace** al review publicado.
+
+### Diagrama de flujo
+
+```
+[diff @ head_sha] ──> [issue] ──> [quality-gates] ──> [checklist] ──> [hallazgos + URL]
+                                                                            │
+                                                                            ▼
+                                                          [árbol de 4 preguntas -> veredicto]
+                                                                            │
+                                                                            ▼
+                                                     ┌── MOSTRAR informe + comando ──┐
+                                                     │      ESPERAR confirmación      │
+                                                     └──────────────┬─────────────────┘
+                                                       "sí"         │        "no"
+                                                        ▼           │         ▼
+                                                [gh pr review]      │   entregar sin publicar
+                                                        │                     STATUS: PARTIAL
+                                        request-changes ▼ approve
+                              [code-review remediation]   [pr-workflow merge]
+```
 
 ---
 
-## 🐞 Bugs
-### 1. <título corto y claro> — <Alto|Medio|Bajo>
-[`archivo:línea`](url-al-blob) <descripción precisa del problema, por qué es un bug, impacto y, si aplica, propuesta de arreglo.>
+## 5. Contrato de Salida
 
-### 2. ...
+### 5.1 Artefacto producido
 
-## 🔒 Seguridad
-- **<título>** — <severidad>. <descripción + referencia a archivo/línea>.
+**Formato:** informe Markdown publicado como review de GitHub + JSON de handoff.
+**Plantilla:** `assets/review-report-template.md`.
 
-## 🧹 Code smells
-| # | Dónde | Qué |
-|---|---|---|
-| 1 | `archivo:línea` | Descripción breve |
+**Reglas de estilo del informe:**
 
-## 📊 Cobertura
-Medido con `<comando de cobertura>` acotado a los archivos del PR (o el comando usado):
-| Archivo | % Stmts | % Branch | Líneas sin cubrir |
-|---|---|---|---|
-| ... | ... | ... | ... |
+- Referencias a código con enlace al blob y SHA del head.
+- Concreto: citar líneas, nombres de métodos, códigos de error y mensajes.
+- No inventar hallazgos. Si una categoría está vacía, indicarlo u omitirla.
+- El resumen ejecutivo debe dejar claro **si el PR se puede aprobar o no**.
 
-<Interpretación de los huecos y relación con el criterio de cierre del issue.>
+```json
+// .agent/handoff/pr-review.json
+{
+  "skill": "pr-review",
+  "version": "1.0.0",
+  "status": "SUCCESS",
+  "pr_number": 42,
+  "head_sha": "<sha>",
+  "verdict": "request-changes",
+  "published": true,
+  "review_url": "https://github.com/<owner>/<repo>/pull/42#pullrequestreview-<id>",
+  "files_reviewed": 12,
+  "files_total": 12,
+  "files_skipped": [],
+  "gates_executed": true,
+  "gate_report_ref": ".agent/handoff/quality-gates.json",
+  "findings": [
+    {
+      "id": 1, "category": "bug", "severity": "alto", "blocking": true,
+      "location": "src/x.ts:42",
+      "url": "https://github.com/<owner>/<repo>/blob/<sha>/src/x.ts#L42",
+      "title": "<título>"
+    }
+  ]
+}
+```
 
-## 📑 Duplicación
-- Descripción de bloques o patrones duplicados + sugerencia de refactor.
+### 5.2 Efectos laterales
+
+| Efecto | Reversible | Requiere confirmación explícita |
+| --- | --- | --- |
+| `gh pr checkout` (modifica el worktree) | Sí | **Sí** |
+| Clonar el repositorio | Sí | **Sí** |
+| Ejecutar la suite de pruebas del PR | Sí | No |
+| **Publicar el review** (público, notifica al autor) | **No** | **Sí** |
+| **`--request-changes`** (bloquea el trabajo de otra persona) | Retirable | **Sí** |
+
+### 5.3 Estado de handoff
+
+```
+STATUS: SUCCESS | BLOCKED | PARTIAL
+ARTIFACTS: .agent/handoff/pr-review.json
+BLOCKERS: <hallazgos bloqueantes, o "ninguno">
+NEXT: code-review [modo: remediation] | pr-workflow [modo: merge]
+```
+
+| STATUS | Cuándo |
+| --- | --- |
+| `SUCCESS` | Revisión completa y review publicado |
+| `BLOCKED` | No se pudo revisar (sin acceso al PR, gates inejecutables y sin acuerdo) |
+| `PARTIAL` | Cobertura parcial del diff, gates no ejecutados, o publicación no confirmada |
 
 ---
 
-## Resumen de cambios pedidos
-1. <cambio> **Bloqueante** (si aplica)
-2. ...
-```
+## 6. Manejo de Errores y Edge Cases
 
-Reglas de estilo del informe:
-- Referencias a código con enlaces al blob de GitHub cuando sea posible (`https://github.com/<owner>/<repo>/blob/<SHA>/path#Lstart-Lend`).
-- Sé concreto: cita líneas, nombres de métodos, códigos de error y mensajes relevantes.
-- No inventes hallazgos. Si no hay nada en una categoría, indícalo o omite la sección.
-- El resumen ejecutivo debe dejar claro si el PR se puede aprobar o no.
+| # | Caso | Detección | Acción | Nunca hacer |
+| --- | --- | --- | --- | --- |
+| 6.1 | Falta número de PR o repo | §3.1 sin valor | **PREGUNTAR Y DETENER** | Adivinar el PR |
+| 6.2 | Diff excede el presupuesto | > 50 archivos o > 3000 líneas | Priorizar por riesgo, listar lo NO revisado, `STATUS: PARTIAL` | Presentar cobertura parcial como completa |
+| 6.3 | Issue inaccesible | Sin acceso al gestor | Pedir el contenido; si no hay, revisar y **declararlo** en el informe | Suponer los criterios de aceptación |
+| 6.4 | **Autor del PR = usuario autenticado** | `author.login` == `gh api user` | GitHub **rechaza** `--approve`: usar `--comment` y declarar que la aprobación requiere un revisor humano distinto | Intentar `--approve` y reportar éxito |
+| 6.5 | Repo no clonado | Directorio no disponible | **Preguntar antes de clonar.** Si se rechaza, revisar solo el diff y declarar que no hubo gates | Clonar un monorepo sin autorización |
+| 6.6 | Gates inejecutables | Dependencias ausentes | Declarar en el informe **qué no se pudo ejecutar y por qué** | Reportar gates verdes sin ejecutarlos |
+| 6.7 | Sin permisos de review | `gh` devuelve 403 | Entregar el informe al usuario para que lo publique él | Fingir la publicación |
+| 6.8 | PR cerrado, mergeado o en draft | `state`/`isDraft` | Preguntar si aun así debe revisarse | Publicar en un PR mergeado sin avisar |
+| 6.9 | El PR avanza durante la revisión | `headRefOid` cambió | Reportar que el informe corresponde al SHA antiguo y ofrecer re-revisar | Publicar sobre un SHA obsoleto en silencio |
+| 6.10 | El usuario pide aplicar los fixes | "arregla lo que encontraste" | **Invocar `code-review [remediation]`** con `findings[]` | Editar archivos desde esta skill |
 
-### 7. Publicar el review en GitHub
+### 6.11 Regla de degradación
 
-Al final de la revisión **siempre** sube el resultado a GitHub. Elige según el estado:
+Si el protocolo no puede completarse: entregar el informe de lo revisado, declarar
+explícitamente lo omitido (archivos, gates, criterio de cierre) y emitir
+`STATUS: PARTIAL`. **Si la publicación no se confirma, el informe se entrega al usuario
+en la conversación** y se declara no publicado.
 
-| Situación | Acción |
-|-----------|--------|
-| Hay hallazgos **bloqueantes** | `gh pr review <N> --repo <owner/repo> --request-changes --body "..."` |
-| No hay bloqueantes pero hay comentarios útiles | `gh pr review <N> --repo <owner/repo> --comment --body "..."` |
-| Todo limpio y gates verdes | `gh pr review <N> --repo <owner/repo> --approve --body "..."` |
+---
 
-El `--body` debe contener el informe completo generado en el paso 6 (o un resumen + enlace si es demasiado largo; preferir el informe completo).
+## 7. Reglas Innegociables
 
-Alternativa si se prefiere comentario normal:
+1. **Evidencia > afirmación.** Preferir salida de comandos, grep y lectura de archivos
+   sobre suposiciones. Las cifras del informe proceden de ejecución real.
+2. **Cero invención.** Un hallazgo sin URL verificable al blob no se publica. Ante
+   duda, preguntar.
+3. **Sin efectos irreversibles sin confirmación.** Publicar un review es público e
+   irreversible: mostrar informe, veredicto y comando, y esperar el "sí".
+4. **Idioma de la salida = idioma del usuario.**
+5. **Responsabilidad humana no delegable** sobre lo que llega a `main`, aunque el
+   cambio lo haya generado una herramienta de AI.
 
-```bash
-gh pr comment <N> --repo <owner/repo> --body "$(cat <<'EOF'
-<informe completo>
-EOF
-)"
-```
+### Reglas específicas de esta skill
 
-Confirma al usuario que el review/comentario se publicó e incluye el enlace al comentario o al review.
+6. **Trabajar siempre sobre el SHA del head** del PR, nunca sobre `main` ni sobre el
+   worktree local.
+7. **Read-only sobre el código.** Nunca editar archivos ni aplicar fixes. Si el usuario
+   pide "arregla lo que encontraste", invocar `code-review [remediation]` pasándole
+   `findings[]`; los fixes se aplican en local, pasan `quality-gates`, se pushean y
+   **regresan a esta skill** para re-review.
+8. **Tono profesional, directo y orientado a acción.**
+9. **Cobertura declarada:** el informe siempre dice cuántos archivos se revisaron de
+   cuántos, y nombra los omitidos.
 
-## Plantilla de decisión rápida
+---
 
-- ¿Cumple el criterio de cierre del issue? → Si no, bloqueante.
-- ¿Gates locales verdes? → Si no, bloqueante.
-- ¿Hay código muerto o regresiones de seguridad? → Bloqueante.
-- ¿Solo smells / mejoras de cobertura menores? → Comentario, no request-changes.
+## 8. Recursos
 
-## Notas de ejecución
-
-- Trabaja siempre sobre el SHA del head del PR.
-- Prefiere evidencia real (salida de comandos, grep, lectura de archivos) sobre suposiciones.
-- Si el repo no está clonado localmente, clónalo o usa `gh` + API para obtener el contenido necesario.
-- Mantén el tono profesional, directo y orientado a acción (como el ejemplo del usuario).
-- El idioma del informe debe coincidir con el del usuario (español en el flujo actual).
-
-## Recursos
-
-- Plantilla de ejemplo completa: ver `assets/review-template.md`
-- Checklist de seguridad y code smells: ver `references/checklist.md`
+| Ruta | Tipo | Cuándo cargar |
+| --- | --- | --- |
+| `references/review-checklist.md` | Conocimiento (copia sincronizada + delta) | Pasos 4 y 5 |
+| `assets/review-report-template.md` | Plantilla de salida | Paso 6 |
